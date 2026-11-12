@@ -23,6 +23,16 @@ Both pages are independent Vite entry points and share the Supabase client and a
    New accounts are always assigned the student role. Role changes from the browser are rejected by a database trigger.
 5. Run `npm install` and `npm run dev` for local development. Use `npm run build` to create the static `dist` output for deployment.
 
+Google sign-in uses the configured Supabase Google provider. Add both local and deployed portal URLs to the Supabase Auth redirect allowlist. The student and teacher pages redirect back to the path where Google sign-in began.
+
+## Classroom and first distribution
+
+1. Promote the educator profile to `teacher` as described above and sign in at `/teacher/index.html`.
+2. Create a classroom and share the displayed join code with students.
+3. Students sign in at `/index.html` and redeem the code. New Google Auth profiles start as students automatically.
+4. Create the source planet, enter two original species, then publish and distribute. Distribution runs as a single database function and makes isolated student planet/species rows. Later distributions add worlds for students who joined afterward without overwriting existing copies.
+5. Apply the migrations in timestamp order after the initial schema migration. `202611120001` enables distribution, `202611120002` adds classroom controls and Realtime, `202611120003` adds per-student assignment targets, `202611120004` grants the authenticated role classroom-members table privileges while RLS still restricts rows and writes, `202611120005` updates security policies and targeted environmental events, and `202611120006` fixes profile RLS recursion. If migrations `001`–`005` are already applied, apply only `202611120006` to fix `infinite recursion detected in policy for relation "profiles"`.
+
 ### Google sign-in setup
 
 Google buttons are available on both portals. To activate them:
@@ -45,7 +55,7 @@ The hosting provider must serve `/teacher/index.html` at that exact path. Deploy
 
 ## Initial implementation scope
 
-The current foundation provides Supabase email/password sign-in, password reset, profile role checks, the separate portal shells, and the initial relational schema/RLS policies for classrooms, planets, species, evolutionary links, events, announcements, assignments, notifications, activity, and private image storage. Students receive their profile automatically on Auth account creation. Classroom creation, planet distribution, species workflows, and the operational teacher dashboard are the next implementation stages.
+The current implementation provides Supabase email/password and Google sign-in, password reset, role checks, separate student and teacher portals, classroom creation and join codes, source planet and original species setup, and transactional planet distribution. Students can inspect and copy complete species profiles, download images, upload descendants, and explore a pan-and-zoom family tree. Teachers can monitor individual student trees, trigger targeted or random extinction, restore species, apply targeted classroom environmental events, send announcements with optional images, and create specific, random, or student-choice assignments.
 
 ## Security notes
 

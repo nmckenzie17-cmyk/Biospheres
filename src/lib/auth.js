@@ -15,8 +15,12 @@ export async function signInWithGoogle() {
 }
 
 export async function signOut() {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw error;
+  const { error } = await supabase.auth.signOut({ scope: 'global' });
+  if (!error) return;
+  // A rejected/expired server session can reject global revocation. Always
+  // clear the current browser session so the user is not trapped signed in.
+  const { error: localError } = await supabase.auth.signOut({ scope: 'local' });
+  if (localError) throw localError;
 }
 
 export async function getProfile(userId) {

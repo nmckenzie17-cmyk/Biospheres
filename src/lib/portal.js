@@ -1,5 +1,6 @@
 import { getProfile, sendPasswordReset, signIn, signInWithGoogle, signOut } from './auth.js';
 import { isSupabaseConfigured, supabase } from './supabase.js';
+import { renderStudentDashboard, renderTeacherDashboard } from './dashboards.js';
 import './styles.css';
 import './google.css';
 
@@ -37,6 +38,7 @@ function showConfigMessage() {
 
 export async function startPortal({ teacher }) {
   if (!isSupabaseConfigured) return showConfigMessage();
+  let activeUserId = null;
 
   const renderLogin = (message = '') => shell({
     teacher,
@@ -59,7 +61,7 @@ export async function startPortal({ teacher }) {
     try {
       const profile = await getProfile(user.id);
       if (teacher && profile.role !== 'teacher') {
-        await signOut();
+        await supabase.auth.signOut({ scope:'local' });
         window.location.replace('/index.html?access=denied');
         return;
       }
@@ -68,24 +70,27 @@ export async function startPortal({ teacher }) {
         app.querySelector('#sign-out').addEventListener('click', signOut);
         return;
       }
-      const { data: planets, error } = await supabase.from('student_planets').select('id, name, description').eq('student_id', user.id).limit(1);
-      if (error) throw error;
-      const planet = planets?.[0];
-      app.innerHTML = `<main class="session-screen"><div class="session-card"><span class="brand-mark">X</span><p class="eyebrow">RESEARCHER ID VERIFIED</p><h1>${escapeHtml(planet?.name || 'Your planet awaits.')}</h1><p>${escapeHtml(planet?.description || 'Your personal world will appear here once your teacher distributes the classroom planet.')}</p><div class="empty-world">${planet ? 'PLANET DATA CONNECTED · SPECIES EXPLORATION COMING ONLINE' : 'AWAITING CLASSROOM PLANET DISTRIBUTION'}</div><button id="sign-out" class="text-button">Sign out</button></div></main>`;
-      app.querySelector('#sign-out').addEventListener('click', signOut);
+      if (teacher) await renderTeacherDashboard(app, profile, user);
+      else await renderStudentDashboard(app, profile, user);
     } catch (error) {
-      await signOut();
-      renderLogin(error.message || 'Your account profile could not be loaded.');
+      console.error('XenoWorld dashboard load failed', error);
+      const code = [error.status, error.code].filter(Boolean).join(' · ');
+      app.innerHTML = `<main class="session-screen"><section class="session-card"><span class="brand-mark">X</span><p class="eyebrow">PORTAL DATA ERROR${code ? ` · ${escapeHtml(code)}` : ''}</p><h1>Your session is active.</h1><p>The portal could not load its Supabase data. Your login has been kept so you can retry after checking the database error.</p><div class="error-detail">${escapeHtml(error.message || 'Unknown Supabase error')}${error.details ? `<br>${escapeHtml(error.details)}` : ''}${error.hint ? `<br>Hint: ${escapeHtml(error.hint)}` : ''}</div><button id="retry-dashboard" class="primary-button">RETRY LOADING <b>↻</b></button><button id="sign-out" class="text-button">Sign out</button></section></main>`;
+      app.querySelector('#retry-dashboard').onclick = () => renderSession(user);
+      app.querySelector('#sign-out').onclick = signOut;
     }
   };
 
   const { data: { session } } = await supabase.auth.getSession();
-  if (session) await renderSession(session.user);
+  if (session) { activeUserId = session.user.id; await renderSession(session.user); }
   else renderLogin(new URLSearchParams(location.search).has('access') ? 'Teacher access requires a teacher account.' : '');
 
   supabase.auth.onAuthStateChange((_event, nextSession) => {
-    if (nextSession) renderSession(nextSession.user);
-    else renderLogin();
+    if (nextSession) {
+      if (activeUserId === nextSession.user.id) return;
+      activeUserId = nextSession.user.id;
+      renderSession(nextSession.user);
+    } else { activeUserId = null; renderLogin(); }
   });
 
   app.addEventListener('submit', async (event) => {
