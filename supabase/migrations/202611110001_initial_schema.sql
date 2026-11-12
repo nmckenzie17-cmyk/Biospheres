@@ -214,7 +214,9 @@ create trigger on_auth_user_created after insert on auth.users for each row exec
 
 create function public.protect_profile_role() returns trigger language plpgsql security definer set search_path = '' as $$
 begin
-  if new.role is distinct from old.role and coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role' then
+  if new.role is distinct from old.role
+     and coalesce(current_setting('request.jwt.claim.role', true), '') <> 'service_role'
+     and session_user not in ('postgres', 'supabase_admin') then
     raise exception 'Profile role can only be changed by a privileged server operation';
   end if;
   return new;
@@ -252,6 +254,11 @@ alter table public.announcements enable row level security;
 alter table public.notifications enable row level security;
 alter table public.assignments enable row level security;
 alter table public.activity_logs enable row level security;
+
+-- Grants allow the authenticated Data API role to reach these tables; RLS below
+-- remains the row-level security boundary. Do not grant anonymous access.
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
 
 create policy "profiles select self or classroom teacher" on public.profiles for select to authenticated
 using (id = (select auth.uid()) or exists (

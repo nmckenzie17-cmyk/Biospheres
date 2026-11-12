@@ -36,7 +36,6 @@ function showConfigMessage() {
 }
 
 export async function startPortal({ teacher }) {
-  const role = teacher ? 'teacher' : 'student';
   if (!isSupabaseConfigured) return showConfigMessage();
 
   const renderLogin = (message = '') => shell({
@@ -53,7 +52,7 @@ export async function startPortal({ teacher }) {
       <button class="primary-button" type="submit"><span>${teacher ? 'ACCESS CONTROL CENTRE' : 'ENTER MY PLANET'}</span><b>→</b></button>
       <button id="reset-password" class="text-button" type="button">Forgot your password?</button>
     </form>
-    ${teacher ? '<a class="portal-link" href="/index.html">Student portal <span>↗</span></a>' : '<a class="portal-link" href="/teacher/index.html">Educator access <span>↗</span></a>'}`,
+    ${teacher ? '<a class="portal-link" href="/index.html">Student portal <span>↗</span></a>' : ''}`,
   });
 
   const renderSession = async (user) => {
