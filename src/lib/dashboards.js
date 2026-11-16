@@ -52,7 +52,7 @@ async function uploadOwnedImage(file, userId, folder) {
   const extension = (file.name.split('.').pop() || 'img').replace(/[^a-z0-9]/gi, '').toLowerCase();
   const path = `${userId}/${folder}/${crypto.randomUUID()}.${extension}`;
   const { error } = await supabase.storage.from('xenoworld-images').upload(path, file, { contentType:file.type, upsert:false });
-  if (error) throw error;
+  if (error) throw new Error(`Image upload failed: ${error.message}`);
   return path;
 }
 const scheduleStudentRefresh = (app, profile, user) => {
@@ -169,23 +169,35 @@ export async function renderTeacherDashboard(app, profile, user, classroomId = n
     const val = (key) => escapeHtml(record[key] ?? '');
     const physical = record.characteristics?.physical || '';
     const tolerances = record.environmental_tolerances?.notes || '';
-    overlay.innerHTML = `<section class="announcement-dialog teacher-record-dialog" role="dialog" aria-modal="true"><button type="button" class="outline-button close-record-dialog">CLOSE</button><p class="eyebrow">TEACHER EDIT // ${isTemplate ? 'ORIGINAL SPECIES' : 'STUDENT SPECIES'}</p><h2>Edit ${escapeHtml(record.name)}</h2>${record.image_url ? `<img class="species-detail-image edit-species-image" src="${escapeHtml(record.image_url)}" alt="${escapeHtml(record.name)}">` : ''}<form class="stack-form record-edit-form"><label>Name<input name="name" required maxlength="100" value="${val('name')}"></label><label>Description<textarea name="description" rows="3">${val('description')}</textarea></label><label>Physical characteristics<input name="physical" value="${escapeHtml(physical)}"></label><div class="species-fields">${[['body_structure','Body structure'],['locomotion','Locomotion'],['diet','Diet'],['habitat','Habitat'],['reproduction','Reproduction'],['lifespan','Lifespan'],['population','Population'],['predators','Predators'],['defensive_adaptations','Defensive adaptations']].map(([key,label]) => `<label>${label}<input name="${key}" value="${escapeHtml(Array.isArray(record[key]) ? record[key].join(', ') : record[key] ?? '')}"></label>`).join('')}</div><label>Environmental tolerances<input name="tolerances" value="${escapeHtml(tolerances)}"></label><label>Evolutionary changes<textarea name="evolutionary_changes" rows="2">${val('evolutionary_changes')}</textarea></label><label>Research notes<textarea name="student_notes" rows="2">${val('student_notes')}</textarea></label><label>Replace species image<input name="image" type="file" accept="image/*"><small>Leave empty to keep the current image.</small></label><button class="primary-button">SAVE SPECIES CHANGES <b>→</b></button></form></section>`;
+    overlay.innerHTML = `<section class="announcement-dialog teacher-record-dialog" role="dialog" aria-modal="true"><button type="button" class="outline-button close-record-dialog">CLOSE</button><p class="eyebrow">TEACHER EDIT // ${isTemplate ? 'ORIGINAL SPECIES' : 'STUDENT SPECIES'}</p><h2>Edit ${escapeHtml(record.name)}</h2>${record.image_url ? `<img class="species-detail-image edit-species-image" src="${escapeHtml(record.image_url)}" alt="${escapeHtml(record.name)}">` : ''}<form class="stack-form record-edit-form"><label>Name<input name="name" required maxlength="100" value="${val('name')}"></label><label>Description<textarea name="description" rows="3">${val('description')}</textarea></label><label>Physical characteristics<input name="physical" value="${escapeHtml(physical)}"></label><div class="species-fields">${[['body_structure','Body structure'],['locomotion','Locomotion'],['diet','Diet'],['habitat','Habitat'],['reproduction','Reproduction'],['lifespan','Lifespan'],['population','Population'],['predators','Predators'],['defensive_adaptations','Defensive adaptations']].map(([key,label]) => `<label>${label}<input name="${key}" value="${escapeHtml(Array.isArray(record[key]) ? record[key].join(', ') : record[key] ?? '')}"></label>`).join('')}</div><label>Environmental tolerances<input name="tolerances" value="${escapeHtml(tolerances)}"></label><label>Evolutionary changes<textarea name="evolutionary_changes" rows="2">${val('evolutionary_changes')}</textarea></label><label>Research notes<textarea name="student_notes" rows="2">${val('student_notes')}</textarea></label><label>Replace species image<input name="image" type="file" accept="image/*"><small>Leave empty to keep the current image.</small></label><button type="submit" class="primary-button">SAVE SPECIES CHANGES <b>→</b></button></form></section>`;
     app.append(overlay); overlay.querySelector('.close-record-dialog').onclick = () => overlay.remove();
     overlay.querySelector('.record-edit-form').onsubmit = async (event) => {
-      event.preventDefault(); const f = new FormData(event.currentTarget); const submit = event.currentTarget.querySelector('button[type="submit"]'); submit.disabled = true;
+      event.preventDefault(); const f = new FormData(event.currentTarget); const submit = event.currentTarget.querySelector('button[type="submit"]'); if (submit) submit.disabled = true;
       try {
         const values = { name:f.get('name').trim(), description:f.get('description'), characteristics:{ ...(record.characteristics || {}), physical:f.get('physical') }, body_structure:f.get('body_structure'), locomotion:f.get('locomotion'), diet:f.get('diet'), habitat:f.get('habitat'), reproduction:f.get('reproduction'), lifespan:f.get('lifespan'), population:f.get('population') || null, predators:f.get('predators').split(',').map((x) => x.trim()).filter(Boolean), defensive_adaptations:f.get('defensive_adaptations').split(',').map((x) => x.trim()).filter(Boolean), environmental_tolerances:{ ...(record.environmental_tolerances || {}), notes:f.get('tolerances') }, evolutionary_changes:f.get('evolutionary_changes'), student_notes:f.get('student_notes') };
         if (isTemplate) { delete values.evolutionary_changes; delete values.student_notes; }
         const imagePath = await uploadOwnedImage(f.get('image'), user.id, 'species'); if (imagePath) values.image_path = imagePath;
         if (isTemplate) {
           const { evolutionary_changes, student_notes, ...sourceValues } = values;
-          const { data:copies, error } = await supabase.rpc('teacher_update_source_species', { p_source_species_id:record.id, p_changes:sourceValues }); if (error) throw error;
-          overlay.remove(); await refreshClass(); notify(`${values.name} updated${copies ? ` in ${copies} student world(s)` : ''}.`);
+          const studentPlanetIds = deployed.map((world) => world.id);
+          let copiedRows = [];
+          if (studentPlanetIds.length) {
+            const { data, error } = await supabase.from('species').select('id').in('planet_id', studentPlanetIds).eq('generation', 0).in('name', [...new Set([record.name, values.name])]);
+            if (error) throw new Error(`Found the source species, but could not load its student copies: ${error.message}`);
+            copiedRows = data || [];
+          }
+          const { error: sourceError } = await supabase.from('planet_species').update(sourceValues).eq('id', record.id);
+          if (sourceError) throw new Error(`Could not save the original species: ${sourceError.message}`);
+          if (copiedRows.length) {
+            const { error: copyError } = await supabase.from('species').update(sourceValues).in('id', copiedRows.map((row) => row.id));
+            if (copyError) throw new Error(`The original species was saved, but its student copies could not be updated: ${copyError.message}`);
+          }
+          overlay.remove(); await refreshClass(); notify(`${values.name} saved${copiedRows.length ? ` and updated in ${copiedRows.length} student species record(s)` : ''}.`);
         } else {
           const { error } = await supabase.from('species').update(values).eq('id',record.id); if (error) throw error;
           overlay.remove(); await refreshClass(); notify(`${values.name} updated.`);
         }
-      } catch (e) { fail(e); submit.disabled = false; }
+      } catch (e) { fail(e); if (submit) submit.disabled = false; }
     };
   };
   const speciesDetails = (record) => {
